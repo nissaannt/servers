@@ -1,0 +1,137 @@
+import socket
+import threading
+import sys
+
+class ChatClient:
+    def __init__(self):
+        self.running = False
+        self.username = ""
+    
+    def get_connection_info(self):
+        print("\n=== Chat Client ===")
+        
+        # Get username
+        while True:
+            username = input("Enter your username: ").strip()
+            if username and len(username) > 0:
+                self.username = username
+                break
+            else:
+                print("Username cannot be empty")
+        
+        # Get server port
+        while True:
+            try:
+                port = int(input("Enter server port (9000 or 9001): "))
+                if port in [9000, 9001]:
+                    break
+                else:
+                    print("Please enter 9000 or 9001")
+            except:
+                print("Invalid port number")
+        
+        # Get protocol
+        while True:
+            protocol = input("Enter protocol (TCP/UDP): ").upper()
+            if protocol in ['TCP', 'UDP']:
+                break
+            else:
+                print("Please enter TCP or UDP")
+        
+        return port, protocol
+    
+    def start(self):
+        port, protocol = self.get_connection_info()
+        
+        if protocol == 'TCP':
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                self.sock.connect(('localhost', port))
+                print(f"Connected to server on port {port} via TCP")
+                
+                # Send username
+                self.sock.sendall(self.username.encode())
+                
+                # Wait for confirmation
+                response = self.sock.recv(1024).decode()
+                if response != "USERNAME_ACCEPTED":
+                    print("Failed to register username")
+                    return
+                    
+            except:
+                print("Failed to connect to server")
+                return
+        else:
+            # UDP: Use ONE socket for both sending and receiving
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # Bind to a specific port so we use the same port for sending and receiving
+            self.sock.bind(('localhost', 0))  # 0 = any available port
+            self.server_addr = ('localhost', port)
+            print(f"Connected to server on port {port} via UDP")
+            print(f"Client UDP port: {self.sock.getsockname()[1]}")
+            
+            # Send username
+            self.sock.sendto(self.username.encode(), self.server_addr)
+            
+            # Wait for confirmation
+            try:
+                self.sock.settimeout(5)
+                response, _ = self.sock.recvfrom(1024)
+                self.sock.settimeout(None)
+                if response.decode() != "USERNAME_ACCEPTED":
+                    print("Failed to register username")
+                    return
+            except:
+                print("Failed to register username")
+                return
+        
+        print(f"\nWelcome {self.username}!")
+        self.running = True
+        
+        # Start receiving thread
+        threading.Thread(target=self.receive_messages, daemon=True).start()
+        
+        print("Start chatting! Type '/quit' to exit\n")
+        
+        try:
+            while self.running:
+                msg = input()
+                if msg == '/quit':
+                    break
+                
+                if msg.strip():  # Only send non-empty messages
+                    if protocol == 'TCP':
+                        self.sock.sendall(msg.encode())
+                    else:
+                        self.sock.sendto(msg.encode(), self.server_addr)
+                    
+        except KeyboardInterrupt:
+            pass
+        finally:
+            self.running = False
+            self.sock.close()
+    
+    def receive_messages(self):
+        if hasattr(self, 'sock'):
+            if self.sock.type == socket.SOCK_STREAM:
+                # TCP receiving
+                while self.running:
+                    try:
+                        data = self.sock.recv(1024)
+                        if not data:
+                            break
+                        print(f"{data.decode()}")
+                    except:
+                        break
+            else:
+                # UDP receiving - use the SAME socket
+                while self.running:
+                    try:
+                        data, addr = self.sock.recvfrom(1024)
+                        print(f"{data.decode()}")
+                    except:
+                        break
+
+if __name__ == "__main__":
+    client = ChatClient()
+    client.start()
